@@ -1,0 +1,300 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum RolUsuario {
+  CLIENTE
+  PERSONAL_ASEO
+  ADMINISTRADOR
+}
+
+enum EstadoUsuario {
+  ACTIVO
+  INACTIVO
+}
+
+enum EstadoSolicitud {
+  PENDIENTE
+  ASIGNADO
+  ACEPTADO
+  EN_PROCESO
+  FINALIZADO
+  CANCELADO
+}
+
+/// SIMULADO_TARJETA y EFECTIVO son los métodos vigentes.
+/// TRANSFERENCIA y NEQUI se conservan solo para los pagos registrados antes del módulo financiero.
+enum MetodoPago {
+  SIMULADO_TARJETA
+  EFECTIVO
+  TRANSFERENCIA
+  NEQUI
+}
+
+enum EstadoPago {
+  PENDIENTE
+  PAGADO
+  CANCELADO
+  REEMBOLSADO
+}
+
+/// Tipos de movimiento del ledger de la wallet del personal.
+/// El signo del monto indica el efecto: positivo = ServiClean le debe más al trabajador.
+enum TipoMovimientoWallet {
+  INGRESO_SERVICIO // + parte del personal en un servicio pagado y finalizado
+  PAGO_EFECTIVO // - efectivo que el trabajador recibió directamente del cliente
+  BONIFICACION // + ajuste autorizado por el administrador
+  DESCUENTO // - ajuste autorizado por el administrador
+  AJUSTE // +/- corrección autorizada por el administrador
+  LIQUIDACION // - pago de ServiClean al trabajador
+}
+
+enum EstadoLiquidacion {
+  PENDIENTE
+  PAGADA
+  CANCELADA
+}
+
+model Usuario {
+  id                 String        @id @default(uuid())
+  nombre             String
+  apellido           String
+  correo             String        @unique
+  contrasena         String
+  telefono           String
+  rol                RolUsuario
+  estado             EstadoUsuario @default(ACTIVO)
+  fechaCreacion      DateTime      @default(now())
+  fechaActualizacion DateTime      @updatedAt
+
+  solicitudesComoCliente  Solicitud[]         @relation("SolicitudesCliente")
+  asignaciones            Asignacion[]        @relation("AsignacionesPersonal")
+  disponibilidad          Disponibilidad[]
+  pagos                   Pago[]
+  notificaciones          Notificacion[]
+  calificacionesDadas     Calificacion[]      @relation("CalificacionesCliente")
+  calificacionesRecibidas Calificacion[]      @relation("CalificacionesPersonal")
+  tokensRecuperacion      TokenRecuperacion[]
+  wallet                  Wallet?
+  movimientosAutorizados  MovimientoWallet[]  @relation("MovimientosAutorizados")
+  liquidacionesCreadas    Liquidacion[]       @relation("LiquidacionesCreadas")
+  liquidacionesPagadas    Liquidacion[]       @relation("LiquidacionesPagadas")
+
+  @@map("usuarios")
+}
+
+model TokenRecuperacion {
+  id            String   @id @default(uuid())
+  token         String   @unique
+  usuarioId     String
+  usuario       Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  expiracion    DateTime
+  utilizado     Boolean  @default(false)
+  fechaCreacion DateTime @default(now())
+
+  @@map("tokens_recuperacion")
+}
+
+model Servicio {
+  id              String   @id @default(uuid())
+  nombre          String
+  descripcion     String
+  precioBase      Decimal  @db.Decimal(10, 2)
+  duracionMinutos Int
+  icono           String   @default("sparkles")
+  activo          Boolean  @default(true)
+  fechaCreacion   DateTime @default(now())
+
+  solicitudes Solicitud[]
+
+  @@map("servicios")
+}
+
+model Solicitud {
+  id                 String          @id @default(uuid())
+  clienteId          String
+  cliente            Usuario         @relation("SolicitudesCliente", fields: [clienteId], references: [id])
+  servicioId         String
+  servicio           Servicio        @relation(fields: [servicioId], references: [id])
+  fecha              DateTime
+  hora               String
+  direccion          String
+  telefono           String
+  observaciones      String?
+  metodoPago         MetodoPago
+  estado             EstadoSolicitud @default(PENDIENTE)
+  fechaCreacion      DateTime        @default(now())
+  fechaActualizacion DateTime        @updatedAt
+
+  asignacion   Asignacion?
+  pago         Pago?
+  calificacion Calificacion?
+  movimientos  MovimientoWallet[]
+
+  @@map("solicitudes")
+}
+
+model Asignacion {
+  id              String    @id @default(uuid())
+  solicitudId     String    @unique
+  solicitud       Solicitud @relation(fields: [solicitudId], references: [id])
+  personalId      String
+  personal        Usuario   @relation("AsignacionesPersonal", fields: [personalId], references: [id])
+  fechaAsignacion DateTime  @default(now())
+  observaciones   String?
+
+  @@map("asignaciones")
+}
+
+model Disponibilidad {
+  id         String   @id @default(uuid())
+  personalId String
+  personal   Usuario  @relation(fields: [personalId], references: [id], onDelete: Cascade)
+  fecha      DateTime
+  horaInicio String
+  horaFin    String
+
+  @@map("disponibilidad")
+}
+
+/// Pago de un servicio. El pago con tarjeta es 100 % SIMULADO (proyecto académico): no existe integración
+/// con pasarelas ni bancos, y nunca se almacena el número completo de la tarjeta ni el CVV.
+model Pago {
+  id                 String     @id @default(uuid())
+  /// Referencia única legible (PAY-XXXXXXXX). Junto con `solicitudId @unique` evita pagos duplicados.
+  referencia         String     @unique
+  solicitudId        String     @unique
+  solicitud          Solicitud  @relation(fields: [solicitudId], references: [id])
+  clienteId          String
+  cliente            Usuario    @relation(fields: [clienteId], references: [id])
+  monto              Decimal    @db.Decimal(10, 2)
+  metodo             MetodoPago
+  estado             EstadoPago @default(PENDIENTE)
+  /// Distribución calculada al registrar el pago; queda fija aunque cambie la configuración después.
+  porcentajeComision Decimal?   @db.Decimal(5, 2)
+  montoComision      Decimal?   @db.Decimal(10, 2)
+  montoPersonal      Decimal?   @db.Decimal(10, 2)
+  /// Únicos datos de tarjeta que se guardan (no sensibles).
+  tarjetaUltimos4    String?    @db.VarChar(4)
+  tarjetaMarca       String?
+  fecha              DateTime   @default(now())
+  fechaActualizacion DateTime   @default(now()) @updatedAt
+
+  movimientos MovimientoWallet[]
+
+  @@index([estado, fecha])
+  @@map("pagos")
+}
+
+model Notificacion {
+  id            String   @id @default(uuid())
+  usuarioId     String
+  usuario       Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  mensaje       String
+  leida         Boolean  @default(false)
+  fechaCreacion DateTime @default(now())
+
+  @@map("notificaciones")
+}
+
+model Calificacion {
+  id            String    @id @default(uuid())
+  solicitudId   String    @unique
+  solicitud     Solicitud @relation(fields: [solicitudId], references: [id])
+  clienteId     String
+  cliente       Usuario   @relation("CalificacionesCliente", fields: [clienteId], references: [id])
+  personalId    String
+  personal      Usuario   @relation("CalificacionesPersonal", fields: [personalId], references: [id])
+  puntuacion    Int
+  comentario    String?
+  fechaCreacion DateTime  @default(now())
+
+  @@map("calificaciones")
+}
+
+/// Wallet del personal de aseo: saldo neto que ServiClean tiene pendiente de liquidar con el trabajador.
+/// Positivo = ServiClean le debe; negativo = el trabajador tiene una obligación con ServiClean.
+/// `saldo` es un acumulado para consultas rápidas; la fuente de verdad es el ledger `MovimientoWallet`.
+model Wallet {
+  id                 String   @id @default(uuid())
+  personalId         String   @unique
+  personal           Usuario  @relation(fields: [personalId], references: [id])
+  saldo              Decimal  @default(0) @db.Decimal(12, 2)
+  fechaCreacion      DateTime @default(now())
+  fechaActualizacion DateTime @updatedAt
+
+  movimientos   MovimientoWallet[]
+  liquidaciones Liquidacion[]
+
+  @@map("wallets")
+}
+
+/// Ledger inmutable de la wallet. Los movimientos nunca se actualizan ni se eliminan
+/// (un trigger de la base de datos lo impide); las correcciones se hacen con nuevos movimientos.
+model MovimientoWallet {
+  id                String               @id @default(uuid())
+  /// Secuencia global: ordena los movimientos de forma determinista.
+  numero            Int                  @unique @default(autoincrement())
+  walletId          String
+  wallet            Wallet               @relation(fields: [walletId], references: [id])
+  tipo              TipoMovimientoWallet
+  concepto          String
+  monto             Decimal              @db.Decimal(12, 2)
+  saldoAnterior     Decimal              @db.Decimal(12, 2)
+  saldoPosterior    Decimal              @db.Decimal(12, 2)
+  solicitudId       String?
+  solicitud         Solicitud?           @relation(fields: [solicitudId], references: [id])
+  pagoId            String?
+  pago              Pago?                @relation(fields: [pagoId], references: [id])
+  liquidacionId     String?              @unique
+  liquidacion       Liquidacion?         @relation(fields: [liquidacionId], references: [id])
+  autorizadoPorId   String?
+  autorizadoPor     Usuario?             @relation("MovimientosAutorizados", fields: [autorizadoPorId], references: [id])
+  /// Evita movimientos duplicados por doble clic o reintentos (p. ej. "PAGO:<id>:INGRESO").
+  claveIdempotencia String?              @unique
+  metadata          Json?
+  fecha             DateTime             @default(now())
+
+  @@index([walletId, numero])
+  @@index([tipo, fecha])
+  @@map("movimientos_wallet")
+}
+
+/// Pago de ServiClean al trabajador por el saldo disponible acumulado desde la última liquidación.
+/// monto = saldoInicial + ingresos - descuentos + ajustes.
+model Liquidacion {
+  id               String            @id @default(uuid())
+  numero           Int               @unique @default(autoincrement())
+  walletId         String
+  wallet           Wallet            @relation(fields: [walletId], references: [id])
+  periodoInicio    DateTime
+  periodoFin       DateTime
+  saldoInicial     Decimal           @db.Decimal(12, 2)
+  ingresos         Decimal           @db.Decimal(12, 2)
+  descuentos       Decimal           @db.Decimal(12, 2)
+  ajustes          Decimal           @db.Decimal(12, 2)
+  monto            Decimal           @db.Decimal(12, 2)
+  /// Movimientos cubiertos: numero > movimientoDesde y numero <= movimientoHasta (trazabilidad del periodo).
+  movimientoDesde  Int
+  movimientoHasta  Int
+  estado           EstadoLiquidacion @default(PENDIENTE)
+  observaciones    String?
+  creadaPorId      String
+  creadaPor        Usuario           @relation("LiquidacionesCreadas", fields: [creadaPorId], references: [id])
+  pagadaPorId      String?
+  pagadaPor        Usuario?          @relation("LiquidacionesPagadas", fields: [pagadaPorId], references: [id])
+  fechaCreacion    DateTime          @default(now())
+  fechaPago        DateTime?
+  fechaCancelacion DateTime?
+
+  movimiento MovimientoWallet?
+
+  @@index([walletId, estado])
+  @@index([estado, fechaCreacion])
+  @@map("liquidaciones")
+}

@@ -1,0 +1,81 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    @apply bg-fondo text-slate-900;
+    text-rendering: optimizeLegibility;
+  }
+
+  h1,
+  h2,
+  h3 {
+    @apply font-display;
+    letter-spacing: -0.015em;
+    text-wrap: balance;
+  }
+
+  :focus-visible {
+    @apply outline-none ring-2 ring-marca-500 ring-offset-2 ring-offset-white;
+  }
+
+  button,
+  a,
+  [role='button'] {
+    touch-action: manipulation;
+  }
+
+  /* Los fieldset tienen min-width: min-content por defecto y provocan desbordamiento horizontal. */
+  fieldset {
+    min-width: 0;
+  }
+
+  ::selection {
+    @apply bg-marca-100 text-marca-900;
+  }
+}
+
+@layer utilities {
+  .cifras {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .texto-largo {
+    overflow-wrap: anywhere;
+  }
+
+  .capitalize-first::first-letter {
+    text-transform: uppercase;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@media print {
+  .no-imprimir {
+    display: none !important;
+  }
+
+  body {
+    background: white;
+  }
+
+  @page {
+    margin: 16mm;
+  }
+}

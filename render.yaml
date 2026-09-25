@@ -1,0 +1,29 @@
+# Blueprint de Render para el backend de ServiClean (plan gratuito).
+# Render → New → Blueprint → seleccionar este repositorio.
+# Las variables marcadas con sync: false se escriben a mano en el panel de Render.
+services:
+  - type: web
+    name: serviclean-backend
+    runtime: node
+    plan: free
+    rootDir: backend
+    # --include=dev: la compilación necesita @nestjs/cli, typescript y prisma (dependencias de desarrollo).
+    buildCommand: npm ci --include=dev && npx prisma generate && npm run build
+    # Aplica las migraciones pendientes en Supabase antes de iniciar la API.
+    startCommand: npx prisma migrate deploy && npm run start:prod
+    healthCheckPath: /servicios
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false # Supabase → Connect → Session pooler (puerto 5432)
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_EXPIRACION
+        value: 7d
+      - key: FRONTEND_URL
+        sync: false # URL pública de Vercel, p. ej. https://serviclean.vercel.app
+      - key: COMISION_SERVICLEAN_PORCENTAJE
+        value: "20"
