@@ -63,8 +63,8 @@ async function main() {
 
   const administrador = await prisma.usuario.create({
     data: {
-      nombre: 'Laura',
-      apellido: 'Gómez',
+      nombre: 'Juan',
+      apellido: 'Parra',
       correo: 'admin@serviclean.com',
       contrasena: contrasenaPrueba,
       telefono: '3001234567',
