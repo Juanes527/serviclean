@@ -24,8 +24,8 @@ export class AsignacionesService {
 
   /**
    * Elige a quién darle una solicitud nueva:
-   * 1. Solo personal activo cuya disponibilidad cubra el servicio completo (inicio + duración)
-   *    y que no tenga otro servicio activo que se cruce ese día.
+   * 1. Solo personal activo disponible a la hora de inicio (la disponibilidad indica cuándo puede
+   *    empezar un servicio, aunque termine después) y sin otro servicio activo que se cruce ese día.
    * 2. Gana la mejor calificación promedio. Quien aún no tiene calificaciones cuenta con el
    *    promedio general, para que el personal nuevo también reciba trabajo.
    * 3. Empates: menos servicios activos, luego quien lleva más tiempo sin recibir una asignación.
@@ -35,7 +35,6 @@ export class AsignacionesService {
     const fin = inicio + solicitud.servicio.duracionMinutos;
 
     const disponibles = (await this.disponibilidadService.buscarPersonalDisponible(solicitud.fecha, solicitud.hora))
-      .filter((d) => aMinutos(d.horaFin) >= fin)
       .map((d) => d.personal);
     const idsDisponibles = [...new Set(disponibles.map((p) => p.id))];
     if (idsDisponibles.length === 0) {
