@@ -115,11 +115,20 @@ describe('AsignacionesService', () => {
     expect(await asignar()).toBe('personal-1');
   });
 
-  it('no asigna a quien no alcanza a terminar el servicio dentro de su disponibilidad', async () => {
+  it('asigna aunque el servicio termine después del fin de la disponibilidad', async () => {
+    // 09:00 + 120 min = 11:00, después de las 10:30: la disponibilidad solo limita la hora de inicio.
     promedios = { 'personal-1': 5, 'personal-2': 3 };
     disponibles = [{ id: 'personal-1', horaFin: '10:30' }, { id: 'personal-2' }];
 
-    expect(await asignar()).toBe('personal-2');
+    expect(await asignar()).toBe('personal-1');
+  });
+
+  it('dos solicitudes a la misma hora van a personas distintas', async () => {
+    serviciosDelDia = [['personal-1', '16:00', 60]];
+
+    expect(await servicio.intentarAsignarAutomaticamente({ ...solicitud, hora: '16:00', servicio: { duracionMinutos: 90 } })).toMatchObject({
+      personalId: 'personal-2',
+    });
   });
 
   it('deja la solicitud pendiente si todos están ocupados a esa hora', async () => {
