@@ -35,10 +35,10 @@ export class SolicitudesService {
     }
 
     const fecha = new Date(datos.fecha);
-    const ahora = new Date();
-    const hoy = new Date(Date.UTC(ahora.getUTCFullYear(), ahora.getUTCMonth(), ahora.getUTCDate()));
-    if (fecha < hoy) {
-      throw new BadRequestException('La fecha del servicio no puede estar en el pasado.');
+    // La hora la elige el cliente en hora de Colombia (UTC-5, sin horario de verano).
+    const inicioServicio = new Date(`${datos.fecha.slice(0, 10)}T${datos.hora}:00-05:00`);
+    if (inicioServicio <= new Date()) {
+      throw new BadRequestException('La fecha y hora del servicio ya pasaron. Elige un horario futuro.');
     }
 
     const solicitud = await this.prisma.solicitud.create({

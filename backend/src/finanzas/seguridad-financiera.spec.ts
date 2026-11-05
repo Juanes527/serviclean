@@ -88,6 +88,12 @@ describe('Seguridad del módulo financiero (guards del backend)', () => {
     it('no puede registrar ni modificar pagos, ni consultar wallets ajenas', () => {
       expect(puedeAcceder(PagosController, 'registrar', 'PERSONAL_ASEO')).toBe(false);
       expect(puedeAcceder(PagosController, 'actualizarEstado', 'PERSONAL_ASEO')).toBe(false);
+      expect(puedeAcceder(PagosController, 'listarTodos', 'PERSONAL_ASEO')).toBe(false);
+    });
+
+    it('solo el personal puede marcar como recibido un pago en efectivo', () => {
+      expect(puedeAcceder(PagosController, 'confirmarEfectivoRecibido', 'PERSONAL_ASEO')).toBe(true);
+      expect(puedeAcceder(PagosController, 'confirmarEfectivoRecibido', 'CLIENTE')).toBe(false);
       expect(puedeAcceder(WalletController, 'walletDePersonal', 'PERSONAL_ASEO')).toBe(false);
       expect(puedeAcceder(WalletController, 'movimientos', 'PERSONAL_ASEO')).toBe(false);
     });

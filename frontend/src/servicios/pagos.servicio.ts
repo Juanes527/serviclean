@@ -22,6 +22,8 @@ export interface FiltrosPagos {
 export const pagosServicio = {
   registrar: (datos: DatosPago) => api.post<Pago>('/pagos', datos),
   misPagos: () => api.get<Pago[]>('/pagos/mios'),
+  /** Personal de aseo: confirma que recibió el efectivo del cliente. */
+  confirmarEfectivoRecibido: (solicitudId: string) => api.patch<Pago>(`/pagos/solicitud/${solicitudId}/efectivo-recibido`),
   listarTodos: (filtros: FiltrosPagos = {}) => api.get<Pago[]>(`/pagos${consulta({ ...filtros })}`),
   /** Verificación de pagos históricos pendientes (Nequi / transferencia). */
   actualizarEstado: (id: string, estado: 'PAGADO' | 'CANCELADO') => api.patch<Pago>(`/pagos/${id}/estado`, { estado }),

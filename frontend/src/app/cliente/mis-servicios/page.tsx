@@ -2,72 +2,65 @@
 
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
-import { ClipboardList, CreditCard, Eye, Plus, SearchX, Star, XCircle } from 'lucide-react';
-import Alerta from '@/components/Alerta';
+import { ClipboardList, CreditCard, Eye, History, Plus, SearchX, XCircle } from 'lucide-react';
 import Avatar from '@/components/Avatar';
 import { useAvisos } from '@/components/Avisos';
 import Boton, { clasesBoton } from '@/components/Boton';
-import CampoTextarea from '@/components/CampoTextarea';
 import DetalleSolicitud from '@/components/DetalleSolicitud';
 import DialogoConfirmacion from '@/components/DialogoConfirmacion';
 import EncabezadoPagina from '@/components/EncabezadoPagina';
 import { EsqueletoLista } from '@/components/Esqueleto';
 import EstadoBadge from '@/components/EstadoBadge';
 import EstadoVacio, { EstadoError } from '@/components/EstadoVacio';
-import { SelectorEstrellas } from '@/components/Estrellas';
 import { CampoBusqueda, FiltroSegmentado, OpcionFiltro } from '@/components/Filtros';
 import IconoServicio from '@/components/IconoServicio';
-import Modal from '@/components/Modal';
 import ModalPago from '@/components/ModalPago';
 import Tabla, { CeldaPrincipal, ColumnaTabla } from '@/components/Tabla';
-import { calificacionesServicio } from '@/servicios/calificaciones.servicio';
 import { solicitudesServicio } from '@/servicios/solicitudes.servicio';
 import { Solicitud } from '@/tipos';
 import { mensajeError } from '@/utilidades/errores';
 import { ESTADOS_CERRADOS } from '@/utilidades/estados';
-import { coincideBusqueda, formatearFechaMedia, formatearHora, formatearPrecio, nombreCompleto } from '@/utilidades/formato';
+import { coincideBusqueda, formatearFechaMedia, formatearHora, formatearPrecio, marcaServicio, nombreCompleto } from '@/utilidades/formato';
 import { useCarga } from '@/utilidades/useCarga';
 
-type Filtro = 'TODOS' | 'EN_CURSO' | 'POR_PAGAR' | 'POR_CALIFICAR' | 'FINALIZADO' | 'CANCELADO';
+/** Solo servicios activos: los finalizados y cancelados pasan al historial. */
+type Filtro = 'TODOS' | 'POR_ASIGNAR' | 'ASIGNADOS' | 'EN_PROCESO' | 'POR_PAGAR';
 
-const puedeCancelar = (solicitud: Solicitud) => !ESTADOS_CERRADOS.includes(solicitud.estado);
-const puedePagar = (solicitud: Solicitud) => !solicitud.pago && solicitud.estado !== 'CANCELADO';
-const puedeCalificar = (solicitud: Solicitud) => solicitud.estado === 'FINALIZADO' && !solicitud.calificacion;
+const esActiva = (solicitud: Solicitud) => !ESTADOS_CERRADOS.includes(solicitud.estado);
+const puedePagar = (solicitud: Solicitud) => !solicitud.pago;
 
 const CRITERIOS: Record<Filtro, (solicitud: Solicitud) => boolean> = {
   TODOS: () => true,
-  EN_CURSO: (solicitud) => !ESTADOS_CERRADOS.includes(solicitud.estado),
+  POR_ASIGNAR: (solicitud) => solicitud.estado === 'PENDIENTE',
+  ASIGNADOS: (solicitud) => solicitud.estado === 'ASIGNADO' || solicitud.estado === 'ACEPTADO',
+  EN_PROCESO: (solicitud) => solicitud.estado === 'EN_PROCESO',
   POR_PAGAR: puedePagar,
-  POR_CALIFICAR: puedeCalificar,
-  FINALIZADO: (solicitud) => solicitud.estado === 'FINALIZADO',
-  CANCELADO: (solicitud) => solicitud.estado === 'CANCELADO',
 };
 
 export default function MisServicios() {
   const { avisar } = useAvisos();
   const { datos, cargando, error, recargar } = useCarga(() => solicitudesServicio.misSolicitudes());
-  const solicitudes = useMemo(() => datos ?? [], [datos]);
+  const solicitudes = useMemo(
+    () => (datos ?? []).filter(esActiva).sort((a, b) => marcaServicio(a.fecha, a.hora) - marcaServicio(b.fecha, b.hora)),
+    [datos],
+  );
+  const tieneHistorial = (datos ?? []).length > solicitudes.length;
   const [filtro, setFiltro] = useState<Filtro>('TODOS');
   const [busqueda, setBusqueda] = useState('');
   const [detalle, setDetalle] = useState<Solicitud | null>(null);
   const [aCancelar, setACancelar] = useState<Solicitud | null>(null);
   const [modalPago, setModalPago] = useState<Solicitud | null>(null);
-  const [modalCalificacion, setModalCalificacion] = useState<Solicitud | null>(null);
-  const [puntuacion, setPuntuacion] = useState(0);
-  const [comentario, setComentario] = useState('');
   const [procesando, setProcesando] = useState(false);
-  const [errorModal, setErrorModal] = useState('');
 
   const opciones: OpcionFiltro<Filtro>[] = useMemo(
     () =>
       (
         [
           ['TODOS', 'Todos'],
-          ['EN_CURSO', 'En curso'],
+          ['POR_ASIGNAR', 'Por asignar'],
+          ['ASIGNADOS', 'Asignados'],
+          ['EN_PROCESO', 'En proceso'],
           ['POR_PAGAR', 'Por pagar'],
-          ['POR_CALIFICAR', 'Por calificar'],
-          ['FINALIZADO', 'Finalizados'],
-          ['CANCELADO', 'Cancelados'],
         ] as [Filtro, string][]
       ).map(([valor, texto]) => ({ valor, texto, total: solicitudes.filter(CRITERIOS[valor]).length })),
     [solicitudes],
@@ -86,14 +79,6 @@ export default function MisServicios() {
     setModalPago(solicitud);
   };
 
-  const abrirCalificacion = (solicitud: Solicitud) => {
-    setDetalle(null);
-    setErrorModal('');
-    setPuntuacion(0);
-    setComentario('');
-    setModalCalificacion(solicitud);
-  };
-
   const cancelar = async () => {
     if (!aCancelar) return;
     setProcesando(true);
@@ -108,40 +93,6 @@ export default function MisServicios() {
     } finally {
       setProcesando(false);
     }
-  };
-
-  const calificar = async () => {
-    if (!modalCalificacion || puntuacion === 0) return;
-    setProcesando(true);
-    setErrorModal('');
-    try {
-      await calificacionesServicio.crear(modalCalificacion.id, puntuacion, comentario);
-      avisar({ tipo: 'exito', titulo: '¡Gracias por tu calificación!', descripcion: 'Tu opinión nos ayuda a mejorar el servicio.' });
-      setModalCalificacion(null);
-      await recargar(true);
-    } catch (excepcion) {
-      setErrorModal(mensajeError(excepcion, 'No fue posible registrar la calificación.'));
-    } finally {
-      setProcesando(false);
-    }
-  };
-
-  const accionContextual = (solicitud: Solicitud) => {
-    if (puedeCalificar(solicitud)) {
-      return (
-        <Boton variante="secundario" tamano="sm" icono={<Star className="h-4 w-4" />} onClick={() => abrirCalificacion(solicitud)}>
-          Calificar
-        </Boton>
-      );
-    }
-    if (puedePagar(solicitud)) {
-      return (
-        <Boton variante="secundario" tamano="sm" icono={<CreditCard className="h-4 w-4" />} onClick={() => abrirPago(solicitud)}>
-          Pagar
-        </Boton>
-      );
-    }
-    return null;
   };
 
   const columnas: ColumnaTabla<Solicitud>[] = [
@@ -195,7 +146,7 @@ export default function MisServicios() {
     <div className="flex flex-col gap-6">
       <EncabezadoPagina
         titulo="Mis servicios"
-        descripcion="Consulta el estado de tus solicitudes, paga tus servicios y califica los que ya finalizaron."
+        descripcion="Tus servicios por asignar y en curso. Los finalizados y cancelados los encuentras en el historial."
         acciones={
           <Link href="/cliente/servicios" className={clasesBoton('primario', 'md', 'w-full sm:w-auto')}>
             <Plus className="h-4 w-4" aria-hidden />
@@ -211,12 +162,24 @@ export default function MisServicios() {
       ) : solicitudes.length === 0 ? (
         <EstadoVacio
           icono={ClipboardList}
-          titulo="Aún no has solicitado servicios"
-          descripcion="Explora el catálogo y agenda tu primera limpieza en pocos pasos."
+          titulo={tieneHistorial ? 'No tienes servicios en curso' : 'Aún no has solicitado servicios'}
+          descripcion={
+            tieneHistorial
+              ? 'Tus servicios finalizados y cancelados están en el historial.'
+              : 'Explora el catálogo y agenda tu primera limpieza en pocos pasos.'
+          }
           accion={
-            <Link href="/cliente/servicios" className={clasesBoton('primario', 'sm')}>
-              Ver catálogo
-            </Link>
+            <div className="flex flex-wrap justify-center gap-2">
+              <Link href="/cliente/servicios" className={clasesBoton('primario', 'sm')}>
+                {tieneHistorial ? 'Nueva solicitud' : 'Ver catálogo'}
+              </Link>
+              {tieneHistorial && (
+                <Link href="/cliente/historial" className={clasesBoton('contorno', 'sm')}>
+                  <History className="h-4 w-4" aria-hidden />
+                  Ver historial
+                </Link>
+              )}
+            </div>
           }
         />
       ) : (
@@ -261,7 +224,11 @@ export default function MisServicios() {
               destacadoMovil={(solicitud) => <EstadoBadge estado={solicitud.estado} />}
               acciones={(solicitud) => (
                 <>
-                  {accionContextual(solicitud)}
+                  {puedePagar(solicitud) && (
+                    <Boton variante="secundario" tamano="sm" icono={<CreditCard className="h-4 w-4" />} onClick={() => abrirPago(solicitud)}>
+                      Pagar
+                    </Boton>
+                  )}
                   <Boton variante="fantasma" tamano="sm" icono={<Eye className="h-4 w-4" />} onClick={() => setDetalle(solicitud)}>
                     Detalles
                   </Boton>
@@ -278,30 +245,22 @@ export default function MisServicios() {
         acciones={
           detalle && (
             <>
-              {puedeCancelar(detalle) && (
-                <Boton
-                  variante="fantasmaPeligro"
-                  className="sm:mr-auto"
-                  icono={<XCircle className="h-4 w-4" />}
-                  onClick={() => {
-                    setACancelar(detalle);
-                    setDetalle(null);
-                  }}
-                >
-                  Cancelar solicitud
-                </Boton>
-              )}
-              {puedePagar(detalle) && (
-                <Boton variante={puedeCalificar(detalle) ? 'contorno' : 'primario'} icono={<CreditCard className="h-4 w-4" />} onClick={() => abrirPago(detalle)}>
+              <Boton
+                variante="fantasmaPeligro"
+                className="sm:mr-auto"
+                icono={<XCircle className="h-4 w-4" />}
+                onClick={() => {
+                  setACancelar(detalle);
+                  setDetalle(null);
+                }}
+              >
+                Cancelar solicitud
+              </Boton>
+              {puedePagar(detalle) ? (
+                <Boton icono={<CreditCard className="h-4 w-4" />} onClick={() => abrirPago(detalle)}>
                   Pagar servicio
                 </Boton>
-              )}
-              {puedeCalificar(detalle) && (
-                <Boton icono={<Star className="h-4 w-4" />} onClick={() => abrirCalificacion(detalle)}>
-                  Calificar servicio
-                </Boton>
-              )}
-              {!puedeCancelar(detalle) && !puedePagar(detalle) && !puedeCalificar(detalle) && (
+              ) : (
                 <Boton variante="contorno" onClick={() => setDetalle(null)}>
                   Cerrar
                 </Boton>
@@ -331,48 +290,6 @@ export default function MisServicios() {
       />
 
       <ModalPago solicitud={modalPago} onCerrar={() => setModalPago(null)} onPagado={() => recargar(true)} />
-
-      <Modal
-        abierto={!!modalCalificacion}
-        titulo="¿Cómo fue tu servicio?"
-        onCerrar={() => setModalCalificacion(null)}
-        pie={
-          <>
-            <Boton variante="contorno" onClick={() => setModalCalificacion(null)} disabled={procesando}>
-              Ahora no
-            </Boton>
-            <Boton onClick={calificar} cargando={procesando} disabled={puntuacion === 0}>
-              Enviar calificación
-            </Boton>
-          </>
-        }
-      >
-        {modalCalificacion && (
-          <div className="flex flex-col gap-6">
-            {errorModal && <Alerta tipo="error" mensaje={errorModal} />}
-            <div className="flex flex-col items-center text-center">
-              {modalCalificacion.asignacion?.personal ? (
-                <>
-                  <Avatar usuario={modalCalificacion.asignacion.personal} tamano="lg" />
-                  <p className="mt-3 text-sm text-slate-500">
-                    Tu servicio de <span className="font-medium text-slate-700">{modalCalificacion.servicio.nombre.toLowerCase()}</span> con
-                  </p>
-                  <p className="font-display text-lg font-bold text-slate-900">{nombreCompleto(modalCalificacion.asignacion.personal)}</p>
-                </>
-              ) : (
-                <p className="font-display text-lg font-bold text-slate-900">{modalCalificacion.servicio.nombre}</p>
-              )}
-            </div>
-            <SelectorEstrellas valor={puntuacion} onCambiar={setPuntuacion} />
-            <CampoTextarea
-              etiqueta="Cuéntanos más (opcional)"
-              placeholder="¿Qué te gustó? ¿Qué podríamos mejorar?"
-              value={comentario}
-              onChange={(evento) => setComentario(evento.target.value)}
-            />
-          </div>
-        )}
-      </Modal>
     </div>
   );
 }

@@ -15,7 +15,7 @@ services:
     healthCheckPath: /servicios
     envVars:
       - key: NODE_VERSION
-        value: "20"
+        value: "22"
       - key: NODE_ENV
         value: production
       - key: DATABASE_URL

@@ -64,8 +64,9 @@ export class PagosService {
             clienteId,
             monto: aDecimal(distribucion.montoCentavos),
             metodo: datos.metodo,
-            // Simulación: la tarjeta siempre se aprueba. En efectivo, el cliente confirma que pagará al personal.
-            estado: 'PAGADO',
+            // Simulación: la tarjeta siempre se aprueba. El efectivo queda pendiente hasta que el personal
+            // asignado confirme que lo recibió (confirmarEfectivoRecibido).
+            estado: esTarjeta ? 'PAGADO' : 'PENDIENTE',
             porcentajeComision: distribucion.porcentajeComision,
             montoComision: aDecimal(distribucion.comisionCentavos),
             montoPersonal: aDecimal(distribucion.personalCentavos),
@@ -92,7 +93,7 @@ export class PagosService {
       clienteId,
       esTarjeta
         ? `Tu pago simulado ${pago.referencia} por ${formatearPesos(distribucion.montoCentavos)} fue registrado correctamente.`
-        : `Registramos que pagarás ${formatearPesos(distribucion.montoCentavos)} en efectivo al personal de aseo (${pago.referencia}).`,
+        : `Registramos que pagarás ${formatearPesos(distribucion.montoCentavos)} en efectivo al personal de aseo (${pago.referencia}). El personal confirmará cuando lo reciba.`,
     );
     const personalId = movimientos.length > 0 ? await this.personalDeSolicitud(solicitud.id) : null;
     if (personalId) await this.walletService.notificarEfectoServicio(personalId, movimientos);
@@ -102,8 +103,94 @@ export class PagosService {
 
   /** Reintento del mismo pago: se devuelve el existente (idempotente). Otro método: conflicto. */
   private pagoExistente(pago: Pago, datos: RegistrarPagoDto) {
-    if (pago.estado === 'PAGADO' && pago.metodo === datos.metodo) return pago;
+    const vigente = pago.estado === 'PAGADO' || (pago.estado === 'PENDIENTE' && pago.metodo === 'EFECTIVO');
+    if (vigente && pago.metodo === datos.metodo) return pago;
     throw new ConflictException('Ya existe un pago registrado para esta solicitud.');
+  }
+
+  /**
+   * El personal asignado confirma que recibió el efectivo del cliente. Solo entonces el pago queda PAGADO
+   * y, si el servicio ya está finalizado, se aplica su efecto en la wallet. Si el cliente no alcanzó a
+   * registrar el pago en la app, se crea aquí. Es idempotente: confirmar dos veces no duplica nada.
+   */
+  async confirmarEfectivoRecibido(personalId: string, solicitudId: string) {
+    const solicitud = await this.prisma.solicitud.findUnique({
+      where: { id: solicitudId },
+      include: { servicio: true, pago: true, asignacion: true },
+    });
+    if (!solicitud) {
+      throw new NotFoundException('Solicitud no encontrada.');
+    }
+    if (solicitud.asignacion?.personalId !== personalId) {
+      throw new ForbiddenException('Este servicio no le fue asignado.');
+    }
+    if ((solicitud.pago?.metodo ?? solicitud.metodoPago) !== 'EFECTIVO') {
+      throw new BadRequestException('Este servicio no se paga en efectivo.');
+    }
+    if (solicitud.pago?.estado === 'PAGADO') {
+      return solicitud.pago;
+    }
+    if (solicitud.pago && solicitud.pago.estado !== 'PENDIENTE') {
+      throw new BadRequestException('El pago de este servicio fue anulado.');
+    }
+    if (!['EN_PROCESO', 'FINALIZADO'].includes(solicitud.estado)) {
+      throw new BadRequestException('Solo puedes confirmar el pago cuando el servicio esté en proceso o finalizado.');
+    }
+
+    const distribucion = calcularDistribucion(aCentavos(solicitud.servicio.precioBase));
+    const datosDistribucion = {
+      porcentajeComision: distribucion.porcentajeComision,
+      montoComision: aDecimal(distribucion.comisionCentavos),
+      montoPersonal: aDecimal(distribucion.personalCentavos),
+    };
+
+    let resultado: { pago: Pago; movimientos: Awaited<ReturnType<WalletService['aplicarPagoDeSolicitud']>> };
+    try {
+      resultado = await this.prisma.$transaction(async (tx) => {
+        if (solicitud.pago) {
+          const cambio = await tx.pago.updateMany({
+            where: { id: solicitud.pago.id, estado: 'PENDIENTE' },
+            // La distribución guardada al registrar se respeta; solo se completa si faltaba.
+            data: { estado: 'PAGADO', ...(solicitud.pago.montoPersonal === null ? datosDistribucion : {}) },
+          });
+          if (cambio.count !== 1) {
+            throw new ConflictException('El pago ya fue actualizado.');
+          }
+        } else {
+          await tx.pago.create({
+            data: {
+              referencia: generarReferenciaPago(),
+              solicitudId,
+              clienteId: solicitud.clienteId,
+              monto: aDecimal(distribucion.montoCentavos),
+              metodo: 'EFECTIVO',
+              estado: 'PAGADO',
+              ...datosDistribucion,
+            },
+          });
+        }
+        const movimientos = await this.walletService.aplicarPagoDeSolicitud(tx, solicitudId);
+        return { pago: await tx.pago.findUniqueOrThrow({ where: { solicitudId } }), movimientos };
+      });
+    } catch (error) {
+      // Doble clic: la otra petición ya confirmó el pago.
+      const yaConfirmado =
+        error instanceof ConflictException ||
+        (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002');
+      if (yaConfirmado) {
+        const existente = await this.prisma.pago.findUnique({ where: { solicitudId } });
+        if (existente?.estado === 'PAGADO') return existente;
+      }
+      throw error;
+    }
+
+    const { pago, movimientos } = resultado;
+    await this.notificacionesService.crear(
+      solicitud.clienteId,
+      `El personal de aseo confirmó que recibió tu pago en efectivo de ${formatearPesos(distribucion.montoCentavos)} (${pago.referencia}).`,
+    );
+    await this.walletService.notificarEfectoServicio(personalId, movimientos);
+    return pago;
   }
 
   private async personalDeSolicitud(solicitudId: string) {
