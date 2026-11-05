@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { PrismaModule } from './prisma/prisma.module';
+import { SupabaseModule } from './supabase/supabase.module';
 import { JwtAuthGuard } from './comun/guards/jwt-auth.guard';
 import { RolesGuard } from './comun/guards/roles.guard';
 import { AuthModule } from './auth/auth.module';
@@ -22,6 +23,7 @@ import { LiquidacionesModule } from './liquidaciones/liquidaciones.module';
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     PrismaModule,
+    SupabaseModule,
     AuthModule,
     UsuariosModule,
     ServiciosModule,

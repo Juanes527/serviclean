@@ -17,7 +17,8 @@ function FormularioRestablecer() {
   const router = useRouter();
   const { avisar } = useAvisos();
   const parametros = useSearchParams();
-  const token = parametros.get('token') ?? '';
+  // Enlace del correo de Supabase: /restablecer-contrasena?token_hash=...&type=recovery
+  const token = parametros.get('token_hash') ?? '';
   const [nuevaContrasena, setNuevaContrasena] = useState('');
   const [confirmarContrasena, setConfirmarContrasena] = useState('');
   const [errores, setErrores] = useState<{ nueva?: string; confirmar?: string }>({});

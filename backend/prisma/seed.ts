@@ -1,5 +1,5 @@
 import { MetodoPago, PrismaClient, Servicio, TipoMovimientoWallet, Usuario } from '@prisma/client';
-import * as bcrypt from 'bcrypt';
+import { asegurarCuenta, clienteAdminSupabase, cuentasExistentes } from './cuentas-supabase';
 import { aCentavos, aDecimal, formatearPesos } from '../src/finanzas/dinero';
 import {
   calcularDesgloseLiquidacion,
@@ -52,12 +52,17 @@ async function registrarMovimiento(datos: {
 }
 
 async function main() {
-  const contrasenaPrueba = await bcrypt.hash('Prueba123', 10);
+  // Las cuentas de prueba viven en Supabase Auth (contraseña Prueba123). Si ya existen, se reutilizan
+  // sin cambiar su contraseña: el proyecto de Supabase es compartido con producción.
+  const supabase = clienteAdminSupabase();
+  const existentes = await cuentasExistentes(supabase);
+  const cuentaDePrueba = async (correo: string) =>
+    (await asegurarCuenta(supabase, existentes, correo, { contrasena: 'Prueba123' })).authId;
 
   // TRUNCATE (no DELETE): los movimientos de wallet son inmutables y un trigger impide borrarlos fila por fila.
   await prisma.$executeRawUnsafe(`
     TRUNCATE TABLE "movimientos_wallet", "liquidaciones", "wallets", "calificaciones", "pagos", "asignaciones",
-      "solicitudes", "disponibilidad", "notificaciones", "tokens_recuperacion", "servicios", "usuarios"
+      "solicitudes", "disponibilidad", "notificaciones", "servicios", "usuarios"
     RESTART IDENTITY CASCADE
   `);
 
@@ -66,7 +71,7 @@ async function main() {
       nombre: 'Juan',
       apellido: 'Parra',
       correo: 'admin@serviclean.com',
-      contrasena: contrasenaPrueba,
+      authId: await cuentaDePrueba('admin@serviclean.com'),
       telefono: '3001234567',
       rol: 'ADMINISTRADOR',
     },
@@ -77,9 +82,9 @@ async function main() {
       { nombre: 'Camila', apellido: 'Rojas', correo: 'camila.cliente@serviclean.com' },
       { nombre: 'Juan', apellido: 'Pérez', correo: 'juan.cliente@serviclean.com' },
       { nombre: 'Ana', apellido: 'Torres', correo: 'ana.cliente@serviclean.com' },
-    ].map((datos, indice) =>
+    ].map(async (datos, indice) =>
       prisma.usuario.create({
-        data: { ...datos, contrasena: contrasenaPrueba, telefono: `310000000${indice + 1}`, rol: 'CLIENTE' },
+        data: { ...datos, authId: await cuentaDePrueba(datos.correo), telefono: `310000000${indice + 1}`, rol: 'CLIENTE' },
       }),
     ),
   );
@@ -89,9 +94,9 @@ async function main() {
       { nombre: 'Marcela', apellido: 'Ibarra', correo: 'marcela.personal@serviclean.com' },
       { nombre: 'Pedro', apellido: 'Salazar', correo: 'pedro.personal@serviclean.com' },
       { nombre: 'Rosa', apellido: 'Fandiño', correo: 'rosa.personal@serviclean.com' },
-    ].map((datos, indice) =>
+    ].map(async (datos, indice) =>
       prisma.usuario.create({
-        data: { ...datos, contrasena: contrasenaPrueba, telefono: `320000000${indice + 1}`, rol: 'PERSONAL_ASEO', fechaCreacion: fechaRelativa(-60) },
+        data: { ...datos, authId: await cuentaDePrueba(datos.correo), telefono: `320000000${indice + 1}`, rol: 'PERSONAL_ASEO', fechaCreacion: fechaRelativa(-60) },
       }),
     ),
   );
