@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { History, SearchX } from 'lucide-react';
+import AccionAsignacion from '@/components/AccionAsignacion';
 import EncabezadoPagina from '@/components/EncabezadoPagina';
 import { EsqueletoLista } from '@/components/Esqueleto';
 import EstadoBadge from '@/components/EstadoBadge';
@@ -103,6 +104,8 @@ export default function HistorialPersonal() {
                 />
               )}
               destacadoMovil={(a) => <EstadoBadge estado={a.solicitud.estado} />}
+              // Servicios finalizados con efectivo pendiente: aquí se marca como recibido.
+              acciones={(a) => <AccionAsignacion asignacion={a} onActualizado={() => recargar(true)} />}
             />
           )}
         </>

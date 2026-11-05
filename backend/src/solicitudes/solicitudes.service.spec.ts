@@ -123,4 +123,32 @@ describe('SolicitudesService', () => {
     expect(asignacionesSimulado.intentarAsignarAutomaticamente).toHaveBeenCalled();
     expect(notificacionesSimulado.crear).toHaveBeenCalled();
   });
+
+  describe('rechaza horarios que ya pasaron (hora de Colombia)', () => {
+    const datosBase = { servicioId: 'serv-1', direccion: 'Calle 1', telefono: '3000000000', metodoPago: 'EFECTIVO' as const };
+
+    beforeEach(() => {
+      jest.useFakeTimers({ now: new Date('2026-11-05T15:00:00-05:00') });
+    });
+    afterEach(() => jest.useRealTimers());
+
+    it('no deja programar hoy a una hora que ya pasó', async () => {
+      await expect(servicio.crear('cliente-1', { ...datosBase, fecha: '2026-11-05', hora: '08:00' })).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(prismaSimulado.solicitud.create).not.toHaveBeenCalled();
+    });
+
+    it('no deja programar en un día anterior', async () => {
+      await expect(servicio.crear('cliente-1', { ...datosBase, fecha: '2026-11-04', hora: '16:00' })).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('deja programar hoy a una hora futura', async () => {
+      prismaSimulado.solicitud.findUnique = jest.fn(() => ({ id: 'sol-2', clienteId: 'cliente-1', estado: 'PENDIENTE' }));
+      await servicio.crear('cliente-1', { ...datosBase, fecha: '2026-11-05', hora: '16:00' });
+      expect(prismaSimulado.solicitud.create).toHaveBeenCalled();
+    });
+  });
 });

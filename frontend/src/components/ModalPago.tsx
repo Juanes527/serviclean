@@ -122,7 +122,7 @@ export default function ModalPago({ solicitud, onCerrar, onPagado }: Propiedades
     return (
       <Modal
         abierto
-        titulo={esTarjeta ? 'Pago exitoso' : 'Pago en efectivo confirmado'}
+        titulo={esTarjeta ? 'Pago exitoso' : 'Pago en efectivo registrado'}
         onCerrar={cerrar}
         pie={
           <Boton onClick={cerrar} data-autofocus className="sm:min-w-32">

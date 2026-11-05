@@ -23,6 +23,13 @@ export class PagosController {
     return this.pagosService.misPagos(usuario.id);
   }
 
+  /** El personal asignado marca como recibido el efectivo que le entregó el cliente. */
+  @Roles(RolUsuario.PERSONAL_ASEO)
+  @Patch('solicitud/:solicitudId/efectivo-recibido')
+  confirmarEfectivoRecibido(@UsuarioActual() usuario: UsuarioAutenticado, @Param('solicitudId') solicitudId: string) {
+    return this.pagosService.confirmarEfectivoRecibido(usuario.id, solicitudId);
+  }
+
   @Roles(RolUsuario.ADMINISTRADOR)
   @Get()
   listarTodos(@Query() filtros: FiltrosPagosDto) {

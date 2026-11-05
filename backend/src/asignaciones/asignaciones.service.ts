@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { EstadoSolicitud, Solicitud } from '@prisma/client';
+import { EstadoSolicitud, Servicio, Solicitud } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { DisponibilidadService } from '../disponibilidad/disponibilidad.service';
 import { NotificacionesService } from '../notificaciones/notificaciones.service';
@@ -7,6 +7,12 @@ import { SELECCION_USUARIO_PUBLICO } from '../comun/selecciones';
 import { ReasignarDto } from './dto/reasignar.dto';
 
 const ESTADOS_CARGA_ACTIVA: EstadoSolicitud[] = ['ASIGNADO', 'ACEPTADO', 'EN_PROCESO'];
+
+/** "HH:mm" → minutos desde la medianoche. */
+const aMinutos = (hora: string) => {
+  const [horas, minutos] = hora.split(':').map(Number);
+  return horas * 60 + minutos;
+};
 
 @Injectable()
 export class AsignacionesService {
@@ -16,29 +22,69 @@ export class AsignacionesService {
     private notificacionesService: NotificacionesService,
   ) {}
 
-  async intentarAsignarAutomaticamente(solicitud: Solicitud) {
-    const disponibilidades = await this.disponibilidadService.buscarPersonalDisponible(
-      solicitud.fecha,
-      solicitud.hora,
-    );
+  /**
+   * Elige a quién darle una solicitud nueva:
+   * 1. Solo personal activo cuya disponibilidad cubra el servicio completo (inicio + duración)
+   *    y que no tenga otro servicio activo que se cruce ese día.
+   * 2. Gana la mejor calificación promedio. Quien aún no tiene calificaciones cuenta con el
+   *    promedio general, para que el personal nuevo también reciba trabajo.
+   * 3. Empates: menos servicios activos, luego quien lleva más tiempo sin recibir una asignación.
+   */
+  async intentarAsignarAutomaticamente(solicitud: Solicitud & { servicio: Pick<Servicio, 'duracionMinutos'> }) {
+    const inicio = aMinutos(solicitud.hora);
+    const fin = inicio + solicitud.servicio.duracionMinutos;
 
-    if (disponibilidades.length === 0) {
+    const disponibles = (await this.disponibilidadService.buscarPersonalDisponible(solicitud.fecha, solicitud.hora))
+      .filter((d) => aMinutos(d.horaFin) >= fin)
+      .map((d) => d.personal);
+    const idsDisponibles = [...new Set(disponibles.map((p) => p.id))];
+    if (idsDisponibles.length === 0) {
       return null;
     }
 
-    const cargasPorPersonal = await this.prisma.asignacion.groupBy({
-      by: ['personalId'],
-      where: { solicitud: { estado: { in: ESTADOS_CARGA_ACTIVA } } },
-      _count: true,
+    const serviciosDelDia = await this.prisma.asignacion.findMany({
+      where: {
+        personalId: { in: idsDisponibles },
+        solicitud: { fecha: solicitud.fecha, estado: { in: ESTADOS_CARGA_ACTIVA } },
+      },
+      select: { personalId: true, solicitud: { select: { hora: true, servicio: { select: { duracionMinutos: true } } } } },
     });
+    const ocupados = new Set(
+      serviciosDelDia
+        .filter(({ solicitud: otro }) => {
+          const otroInicio = aMinutos(otro.hora);
+          return otroInicio < fin && inicio < otroInicio + otro.servicio.duracionMinutos;
+        })
+        .map((a) => a.personalId),
+    );
+    const candidatos = idsDisponibles.filter((id) => !ocupados.has(id));
+    if (candidatos.length === 0) {
+      return null;
+    }
 
-    const cargaMap = new Map(cargasPorPersonal.map((c) => [c.personalId, c._count]));
+    const [calificaciones, general, cargas, ultimas] = await Promise.all([
+      this.prisma.calificacion.groupBy({ by: ['personalId'], where: { personalId: { in: candidatos } }, _avg: { puntuacion: true } }),
+      this.prisma.calificacion.aggregate({ _avg: { puntuacion: true } }),
+      this.prisma.asignacion.groupBy({
+        by: ['personalId'],
+        where: { personalId: { in: candidatos }, solicitud: { estado: { in: ESTADOS_CARGA_ACTIVA } } },
+        _count: true,
+      }),
+      this.prisma.asignacion.groupBy({ by: ['personalId'], where: { personalId: { in: candidatos } }, _max: { fechaAsignacion: true } }),
+    ]);
+    const promedioGeneral = general._avg.puntuacion ?? 0;
+    const promedio = new Map(calificaciones.map((c) => [c.personalId, c._avg.puntuacion ?? promedioGeneral]));
+    const carga = new Map(cargas.map((c) => [c.personalId, c._count]));
+    const ultima = new Map(ultimas.map((u) => [u.personalId, u._max.fechaAsignacion?.getTime() ?? 0]));
 
-    const candidatos = disponibilidades
-      .map((d) => d.personal)
-      .sort((a, b) => (cargaMap.get(a.id) ?? 0) - (cargaMap.get(b.id) ?? 0));
-
-    const personalSeleccionado = candidatos[0];
+    const [personalSeleccionadoId] = candidatos.sort(
+      (a, b) =>
+        (promedio.get(b) ?? promedioGeneral) - (promedio.get(a) ?? promedioGeneral) ||
+        (carga.get(a) ?? 0) - (carga.get(b) ?? 0) ||
+        (ultima.get(a) ?? 0) - (ultima.get(b) ?? 0) ||
+        a.localeCompare(b),
+    );
+    const personalSeleccionado = { id: personalSeleccionadoId };
 
     const asignacion = await this.prisma.asignacion.create({
       data: { solicitudId: solicitud.id, personalId: personalSeleccionado.id },
@@ -65,7 +111,8 @@ export class AsignacionesService {
     return this.prisma.asignacion.findMany({
       where: { personalId },
       include: {
-        solicitud: { include: { servicio: true, cliente: { select: SELECCION_USUARIO_PUBLICO } } },
+        // El pago se incluye para que el personal vea si debe confirmar el efectivo recibido.
+        solicitud: { include: { servicio: true, pago: true, cliente: { select: SELECCION_USUARIO_PUBLICO } } },
       },
       orderBy: { fechaAsignacion: 'desc' },
     });

@@ -124,7 +124,7 @@ export default function InicioCliente() {
           valor={porCalificar.length}
           icono={Star}
           tono="advertencia"
-          href="/cliente/mis-servicios"
+          href="/cliente/historial"
           contexto={porCalificar.length > 0 ? 'Cuéntanos cómo te fue' : 'Estás al día con tus calificaciones'}
         />
       </div>
@@ -262,7 +262,7 @@ export default function InicioCliente() {
               {recientes.map((solicitud) => (
                 <li key={solicitud.id}>
                   <Link
-                    href="/cliente/mis-servicios"
+                    href={ESTADOS_CERRADOS.includes(solicitud.estado) ? '/cliente/historial' : '/cliente/mis-servicios'}
                     className="flex items-center gap-4 px-4 py-3.5 transition-colors hover:bg-slate-50/80 sm:px-5"
                   >
                     <IconoServicio icono={solicitud.servicio.icono} tamano="sm" />

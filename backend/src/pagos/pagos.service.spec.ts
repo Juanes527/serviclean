@@ -154,21 +154,26 @@ describe('PagosService', () => {
   });
 
   describe('efectivo', () => {
-    it('registra el pago en efectivo', async () => {
-      const solicitudId = bd.crearSolicitud({ clienteId, personalId, precio: 50000 });
+    it('el cliente registra el pago en efectivo y queda pendiente hasta que el personal lo confirme', async () => {
+      const solicitudId = bd.crearSolicitud({ clienteId, personalId, precio: 50000, estado: 'FINALIZADO' });
 
       const pago = await pagos.registrar(clienteId, { solicitudId, metodo: 'EFECTIVO' });
 
       expect(pago.metodo).toBe('EFECTIVO');
-      expect(pago.estado).toBe('PAGADO');
+      expect(pago.estado).toBe('PENDIENTE');
       expect(pago.tarjetaUltimos4).toBeNull();
+      expect(bd.movimientosDe(personalId)).toHaveLength(0);
+      // Reintento del cliente: devuelve el mismo pago pendiente.
+      expect((await pagos.registrar(clienteId, { solicitudId, metodo: 'EFECTIVO' })).id).toBe(pago.id);
     });
 
-    it('genera los movimientos correctos y puede dejar la wallet en negativo', async () => {
+    it('genera los movimientos correctos al confirmarlo el personal y puede dejar la wallet en negativo', async () => {
       const solicitudId = bd.crearSolicitud({ clienteId, personalId, precio: 50000, estado: 'FINALIZADO' });
-
       await pagos.registrar(clienteId, { solicitudId, metodo: 'EFECTIVO' });
 
+      const pago = await pagos.confirmarEfectivoRecibido(personalId, solicitudId);
+
+      expect(pago.estado).toBe('PAGADO');
       expect(bd.movimientosDe(personalId).map((m) => [m.tipo, Number(m.monto)])).toEqual([
         ['INGRESO_SERVICIO', 40000],
         ['PAGO_EFECTIVO', -50000],
@@ -181,9 +186,59 @@ describe('PagosService', () => {
       const conTarjeta = bd.crearSolicitud({ clienteId, personalId, precio: 50000, estado: 'FINALIZADO' });
 
       await pagos.registrar(clienteId, { solicitudId: enEfectivo, metodo: 'EFECTIVO' });
+      await pagos.confirmarEfectivoRecibido(personalId, enEfectivo);
       expect(bd.saldo(personalId)).toBe(-10000);
       await pagos.registrar(clienteId, { solicitudId: conTarjeta, metodo: 'SIMULADO_TARJETA', tarjetaUltimos4: '1111', tarjetaMarca: 'MASTERCARD' });
       expect(bd.saldo(personalId)).toBe(30000);
+    });
+
+    it('el personal puede confirmar el efectivo aunque el cliente no lo haya registrado en la app', async () => {
+      const solicitudId = bd.crearSolicitud({ clienteId, personalId, precio: 50000, estado: 'FINALIZADO' });
+
+      const pago = await pagos.confirmarEfectivoRecibido(personalId, solicitudId);
+
+      expect(pago).toMatchObject({ metodo: 'EFECTIVO', estado: 'PAGADO', clienteId });
+      expect(Number(pago.montoPersonal)).toBe(40000);
+      expect(bd.saldo(personalId)).toBe(-10000);
+    });
+
+    it('confirmar dos veces no duplica movimientos', async () => {
+      const solicitudId = bd.crearSolicitud({ clienteId, personalId, precio: 50000, estado: 'FINALIZADO' });
+      await pagos.registrar(clienteId, { solicitudId, metodo: 'EFECTIVO' });
+
+      const [primero, segundo] = await Promise.all([
+        pagos.confirmarEfectivoRecibido(personalId, solicitudId),
+        pagos.confirmarEfectivoRecibido(personalId, solicitudId),
+      ]);
+
+      expect(segundo.id).toBe(primero.id);
+      expect(bd.movimientosDe(personalId)).toHaveLength(2);
+    });
+
+    it('si se confirma durante el servicio, la wallet se ajusta al finalizarlo', async () => {
+      const solicitudId = bd.crearSolicitud({ clienteId, personalId, precio: 50000, estado: 'EN_PROCESO' });
+
+      await pagos.confirmarEfectivoRecibido(personalId, solicitudId);
+      expect(bd.movimientosDe(personalId)).toHaveLength(0);
+
+      bd.finalizar(solicitudId);
+      await bd.$transaction((tx) => wallet.aplicarPagoDeSolicitud(tx as any, solicitudId));
+      expect(bd.saldo(personalId)).toBe(-10000);
+    });
+
+    it('solo el personal asignado puede confirmarlo', async () => {
+      const otroPersonal = bd.crearUsuario('PERSONAL_ASEO');
+      const solicitudId = bd.crearSolicitud({ clienteId, personalId, precio: 50000, estado: 'FINALIZADO' });
+
+      await expect(pagos.confirmarEfectivoRecibido(otroPersonal, solicitudId)).rejects.toThrow(ForbiddenException);
+    });
+
+    it('no se puede confirmar antes de iniciar el servicio ni en servicios pagados con tarjeta', async () => {
+      const sinIniciar = bd.crearSolicitud({ clienteId, personalId, precio: 50000, estado: 'ACEPTADO' });
+      const conTarjeta = bd.crearSolicitud({ clienteId, personalId, precio: 50000, estado: 'FINALIZADO', metodoPago: 'SIMULADO_TARJETA' });
+
+      await expect(pagos.confirmarEfectivoRecibido(personalId, sinIniciar)).rejects.toThrow(BadRequestException);
+      await expect(pagos.confirmarEfectivoRecibido(personalId, conTarjeta)).rejects.toThrow(BadRequestException);
     });
   });
 
