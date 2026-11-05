@@ -9,8 +9,9 @@ services:
     rootDir: backend
     # --include=dev: la compilación necesita @nestjs/cli, typescript y prisma (dependencias de desarrollo).
     buildCommand: npm ci --include=dev && npx prisma generate && npm run build
-    # Aplica las migraciones pendientes en Supabase antes de iniciar la API.
-    startCommand: npx prisma migrate deploy && npm run start:prod
+    # Aplica las migraciones pendientes en Supabase y enlaza con Supabase Auth a los usuarios que aún no
+    # tengan cuenta (idempotente; si falla, la API arranca igual y el error queda en los logs).
+    startCommand: npx prisma migrate deploy && (npm run importar:usuarios || true) && npm run start:prod
     healthCheckPath: /servicios
     envVars:
       - key: NODE_VERSION

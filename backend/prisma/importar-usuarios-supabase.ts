@@ -3,7 +3,7 @@
  * (siguen entrando con la misma contraseña) y guarda el id en usuarios.auth_id. Es idempotente.
  *
  * Uso (aplica a la base de DATABASE_URL):  npm run importar:usuarios
- * Producción:  DATABASE_URL="<url de Supabase>" npm run importar:usuarios
+ * En producción Render lo ejecuta al iniciar, justo después de las migraciones (ver render.yaml).
  */
 import { PrismaClient } from '@prisma/client';
 import { asegurarCuenta, clienteAdminSupabase, cuentasExistentes } from './cuentas-supabase';
@@ -20,6 +20,7 @@ async function main() {
   try {
     const pendientes = await prisma.usuario.findMany({ where: { authId: null }, orderBy: { fechaCreacion: 'asc' } });
     console.log(`Usuarios sin cuenta de Supabase Auth: ${pendientes.length}`);
+    if (pendientes.length === 0) return;
     const existentes = await cuentasExistentes(supabase);
     const fallidos: string[] = [];
 
