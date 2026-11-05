@@ -65,39 +65,29 @@ model Usuario {
   nombre             String
   apellido           String
   correo             String        @unique
-  contrasena         String
+  /// Id de la cuenta en Supabase Auth (auth.users.id). Supabase guarda la contraseña y la verificación del correo.
+  authId             String?       @unique @map("auth_id") @db.Uuid
+  /// Hash bcrypt heredado: solo se conserva para importar usuarios a Supabase Auth. Se eliminará después.
+  contrasena         String?
   telefono           String
   rol                RolUsuario
   estado             EstadoUsuario @default(ACTIVO)
   fechaCreacion      DateTime      @default(now())
   fechaActualizacion DateTime      @updatedAt
 
-  solicitudesComoCliente  Solicitud[]         @relation("SolicitudesCliente")
-  asignaciones            Asignacion[]        @relation("AsignacionesPersonal")
+  solicitudesComoCliente  Solicitud[]        @relation("SolicitudesCliente")
+  asignaciones            Asignacion[]       @relation("AsignacionesPersonal")
   disponibilidad          Disponibilidad[]
   pagos                   Pago[]
   notificaciones          Notificacion[]
-  calificacionesDadas     Calificacion[]      @relation("CalificacionesCliente")
-  calificacionesRecibidas Calificacion[]      @relation("CalificacionesPersonal")
-  tokensRecuperacion      TokenRecuperacion[]
+  calificacionesDadas     Calificacion[]     @relation("CalificacionesCliente")
+  calificacionesRecibidas Calificacion[]     @relation("CalificacionesPersonal")
   wallet                  Wallet?
-  movimientosAutorizados  MovimientoWallet[]  @relation("MovimientosAutorizados")
-  liquidacionesCreadas    Liquidacion[]       @relation("LiquidacionesCreadas")
-  liquidacionesPagadas    Liquidacion[]       @relation("LiquidacionesPagadas")
+  movimientosAutorizados  MovimientoWallet[] @relation("MovimientosAutorizados")
+  liquidacionesCreadas    Liquidacion[]      @relation("LiquidacionesCreadas")
+  liquidacionesPagadas    Liquidacion[]      @relation("LiquidacionesPagadas")
 
   @@map("usuarios")
-}
-
-model TokenRecuperacion {
-  id            String   @id @default(uuid())
-  token         String   @unique
-  usuarioId     String
-  usuario       Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
-  expiracion    DateTime
-  utilizado     Boolean  @default(false)
-  fechaCreacion DateTime @default(now())
-
-  @@map("tokens_recuperacion")
 }
 
 model Servicio {

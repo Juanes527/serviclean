@@ -5,10 +5,12 @@ import { useRouter } from 'next/navigation';
 import { FormEvent, useState } from 'react';
 import { ArrowRight, LockKeyhole, Mail } from 'lucide-react';
 import Alerta from '@/components/Alerta';
+import AvisoVerificarCorreo from '@/components/AvisoVerificarCorreo';
 import Boton from '@/components/Boton';
 import CampoTexto from '@/components/CampoTexto';
 import DisenoAutenticacion from '@/components/DisenoAutenticacion';
-import { authServicio } from '@/servicios/auth.servicio';
+import { authServicio, CODIGO_CORREO_NO_VERIFICADO } from '@/servicios/auth.servicio';
+import { ErrorApi } from '@/utilidades/apiCliente';
 import { rutaInicioPorRol, useAutenticacion } from '@/utilidades/contextoAutenticacion';
 import { mensajeError } from '@/utilidades/errores';
 
@@ -19,6 +21,7 @@ export default function PaginaIniciarSesion() {
   const [contrasena, setContrasena] = useState('');
   const [error, setError] = useState('');
   const [cargando, setCargando] = useState(false);
+  const [pendienteVerificacion, setPendienteVerificacion] = useState(false);
 
   const enviar = async (evento: FormEvent) => {
     evento.preventDefault();
@@ -29,10 +32,25 @@ export default function PaginaIniciarSesion() {
       await refrescarPerfil();
       router.push(rutaInicioPorRol(resultado.usuario.rol));
     } catch (excepcion) {
-      setError(mensajeError(excepcion, 'No fue posible iniciar sesión.'));
+      if (excepcion instanceof ErrorApi && excepcion.codigo === CODIGO_CORREO_NO_VERIFICADO) {
+        setPendienteVerificacion(true);
+      } else {
+        setError(mensajeError(excepcion, 'No fue posible iniciar sesión.'));
+      }
       setCargando(false);
     }
   };
+
+  if (pendienteVerificacion) {
+    return (
+      <DisenoAutenticacion
+        titulo="Verifica tu correo"
+        descripcion="Tu cuenta aún no está activa. Confirma tu correo para poder iniciar sesión."
+      >
+        <AvisoVerificarCorreo correo={correo} onVolver={() => setPendienteVerificacion(false)} />
+      </DisenoAutenticacion>
+    );
+  }
 
   return (
     <DisenoAutenticacion

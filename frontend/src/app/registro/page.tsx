@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { FormEvent, useState } from 'react';
 import { ArrowRight, Check, House, LockKeyhole, LucideIcon, Mail, Phone, Sparkles } from 'lucide-react';
 import Alerta from '@/components/Alerta';
+import AvisoVerificarCorreo from '@/components/AvisoVerificarCorreo';
 import Boton from '@/components/Boton';
 import CampoTexto from '@/components/CampoTexto';
 import DisenoAutenticacion from '@/components/DisenoAutenticacion';
@@ -49,6 +50,7 @@ export default function PaginaRegistro() {
   const [errores, setErrores] = useState<Record<string, string>>({});
   const [errorGeneral, setErrorGeneral] = useState('');
   const [cargando, setCargando] = useState(false);
+  const [correoPorVerificar, setCorreoPorVerificar] = useState('');
 
   const actualizarCampo = (campo: CampoRegistro, valor: string) => {
     setDatos((anterior) => ({ ...anterior, [campo]: valor }));
@@ -70,6 +72,10 @@ export default function PaginaRegistro() {
     setCargando(true);
     try {
       const resultado = await authServicio.registrar(datos);
+      if ('requiereVerificacion' in resultado) {
+        setCorreoPorVerificar(resultado.correo);
+        return;
+      }
       await refrescarPerfil();
       router.push(rutaInicioPorRol(resultado.usuario.rol));
     } catch (excepcion) {
@@ -77,6 +83,22 @@ export default function PaginaRegistro() {
       setCargando(false);
     }
   };
+
+  if (correoPorVerificar) {
+    return (
+      <DisenoAutenticacion
+        titulo="Revisa tu correo"
+        descripcion="Tu cuenta fue creada. Solo falta confirmar tu correo electrónico."
+        pie={
+          <Link href="/iniciar-sesion" className="font-semibold text-marca-700 hover:text-marca-800 hover:underline">
+            Ir a iniciar sesión
+          </Link>
+        }
+      >
+        <AvisoVerificarCorreo correo={correoPorVerificar} />
+      </DisenoAutenticacion>
+    );
+  }
 
   return (
     <DisenoAutenticacion

@@ -9,8 +9,9 @@ services:
     rootDir: backend
     # --include=dev: la compilación necesita @nestjs/cli, typescript y prisma (dependencias de desarrollo).
     buildCommand: npm ci --include=dev && npx prisma generate && npm run build
-    # Aplica las migraciones pendientes en Supabase antes de iniciar la API.
-    startCommand: npx prisma migrate deploy && npm run start:prod
+    # Aplica las migraciones pendientes en Supabase y enlaza con Supabase Auth a los usuarios que aún no
+    # tengan cuenta (idempotente; si falla, la API arranca igual y el error queda en los logs).
+    startCommand: npx prisma migrate deploy && (npm run importar:usuarios || true) && npm run start:prod
     healthCheckPath: /servicios
     envVars:
       - key: NODE_VERSION
@@ -19,11 +20,13 @@ services:
         value: production
       - key: DATABASE_URL
         sync: false # Supabase → Connect → Session pooler (puerto 5432)
-      - key: JWT_SECRET
-        generateValue: true
-      - key: JWT_EXPIRACION
-        value: 7d
+      - key: SUPABASE_URL
+        value: https://omqtedsddjcltglssied.supabase.co
+      - key: SUPABASE_PUBLISHABLE_KEY
+        value: sb_publishable_hSMZfyg8uO-f-d65NJvuTg_NGTvXlxL
+      - key: SUPABASE_SECRET_KEY
+        sync: false # Supabase → Project Settings → API Keys → Secret key
       - key: FRONTEND_URL
-        sync: false # URL pública de Vercel, p. ej. https://serviclean.vercel.app
+        sync: false # URL pública de Vercel: https://serviclean-ten.vercel.app (sin barra final)
       - key: COMISION_SERVICLEAN_PORCENTAJE
         value: "20"

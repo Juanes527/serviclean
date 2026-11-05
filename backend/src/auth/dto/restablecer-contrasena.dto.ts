@@ -1,8 +1,9 @@
-import { IsNotEmpty, MinLength } from 'class-validator';
+import { IsNotEmpty, IsString, MinLength } from 'class-validator';
 
 export class RestablecerContrasenaDto {
-  @IsNotEmpty({ message: 'El token de recuperación es obligatorio.' })
-  token: string;
+  @IsString()
+  @IsNotEmpty({ message: 'El enlace de recuperación no es válido.' })
+  tokenHash: string;
 
   @MinLength(8, { message: 'La contraseña debe tener al menos 8 caracteres.' })
   nuevaContrasena: string;
